@@ -59,12 +59,12 @@ class ExportLabTests(unittest.TestCase):
             self.assertIsNone(outer.testzip())
             self.assertEqual(set(outer.namelist()), {
                 f"{plan.stem}.pdf", f"{plan.stem}.zip",
-                "pdf/参考资料.pdf",
+                "参考资料.pdf",
                 "实验结果/images/result.PNG", "实验结果/videos/demo.mp4",
                 "实验结果/images/nested/result.PNG",
             })
             self.assertEqual(outer.read(f"{plan.stem}.pdf"), original[self.report])
-            self.assertEqual(outer.read("pdf/参考资料.pdf"), original[self.lab / "docs/pdf/参考资料.pdf"])
+            self.assertEqual(outer.read("参考资料.pdf"), original[self.lab / "docs/pdf/参考资料.pdf"])
             code_bytes = outer.read(f"{plan.stem}.zip")
             self.assertEqual(size, len(code_bytes))
             with ZipFile(io.BytesIO(code_bytes)) as code:
@@ -87,27 +87,45 @@ class ExportLabTests(unittest.TestCase):
         export_lab.export_zip(plan)
         with ZipFile(plan.output) as archive:
             self.assertEqual(archive.read(f"{plan.stem}.pdf"), second.read_bytes())
-            self.assertEqual(archive.read("pdf/" + self.report.name), self.report.read_bytes())
-            self.assertIn("pdf/参考资料.pdf", archive.namelist())
+            self.assertEqual(archive.read("123456-测试-week_1 (2).pdf"), self.report.read_bytes())
+            self.assertIn("参考资料.pdf", archive.namelist())
 
-    def test_all_pdfs_keep_relative_paths_and_contents(self):
-        extra = [
-            self.put("docs/pdf/nested/参考资料.PDF", b"%PDF-1.4\nnested\n"),
-            self.put("docs/pdf/another/参考资料.pdf", b"%PDF-1.4\nanother\n"),
-            self.put("docs/pdf/.hidden.pdf", b"%PDF-1.4\nhidden\n"),
-            self.put("docs/pdf/.drafts/draft.pdf", b"%PDF-1.4\ndraft\n"),
-            self.put("docs/pdf/build/diagram.pdf", b"%PDF-1.4\ndiagram\n"),
-        ]
+    def test_all_pdfs_are_flat_and_duplicate_names_keep_all_contents(self):
+        for relative, content in [
+            ("docs/pdf/nested/参考资料.PDF", b"%PDF-1.4\nnested\n"),
+            ("docs/pdf/another/参考资料.pdf", b"%PDF-1.4\nanother\n"),
+            ("docs/pdf/参考资料 (2).pdf", b"%PDF-1.4\nexisting numbered file\n"),
+            ("docs/pdf/.hidden.pdf", b"%PDF-1.4\nhidden\n"),
+            ("docs/pdf/.drafts/draft.pdf", b"%PDF-1.4\ndraft\n"),
+            ("docs/pdf/build/diagram.pdf", b"%PDF-1.4\ndiagram\n"),
+        ]:
+            self.put(relative, content)
         self.put("docs/pdf/notes.txt", b"not a PDF")
         plan = export_lab.make_plan(self.args())
         export_lab.export_zip(plan)
         with ZipFile(plan.output) as archive:
             self.assertIsNone(archive.testzip())
-            self.assertEqual(len([n for n in archive.namelist() if n.lower().endswith(".pdf")]), 7)
-            for path in extra:
-                member = "pdf/" + path.relative_to(self.lab / "docs/pdf").as_posix()
-                self.assertEqual(archive.read(member), path.read_bytes())
-            self.assertNotIn("pdf/notes.txt", archive.namelist())
+            pdf_names = [n for n in archive.namelist() if n.lower().endswith(".pdf")]
+            self.assertEqual(len(pdf_names), 8)
+            self.assertTrue(all("/" not in name for name in pdf_names))
+            self.assertEqual(len({name.casefold() for name in pdf_names}), 8)
+            self.assertCountEqual(
+                [archive.read(name) for name in pdf_names],
+                [path.read_bytes() for path in plan.pdfs],
+            )
+            for name in ("参考资料.pdf", "参考资料 (2).pdf"):
+                self.assertEqual(archive.read(name), (self.lab / "docs/pdf" / name).read_bytes())
+            self.assertFalse(any(name.startswith("pdf/") for name in archive.namelist()))
+            self.assertNotIn("notes.txt", archive.namelist())
+
+    def test_default_names_have_no_folder_name_suffix(self):
+        plan = export_lab.make_plan(self.args())
+        self.assertEqual(plan.output.name, "123456-测试-week_1-提交.zip")
+        export_lab.export_zip(plan)
+        with ZipFile(plan.output) as archive:
+            self.assertIn("123456-测试-week_1.pdf", archive.namelist())
+            self.assertIn("123456-测试-week_1.zip", archive.namelist())
+            self.assertFalse(any("-week1" in name for name in archive.namelist()))
 
     def test_wrong_week_and_outside_report_are_rejected(self):
         wrong = self.put("docs/pdf/123456-测试-week_2.pdf", b"%PDF-1.4\nweek two\n")
@@ -172,7 +190,7 @@ class ExportLabTests(unittest.TestCase):
         plan = export_lab.make_plan(self.args(
             "--report", str(custom), "--student-id", "789", "--name", "张三",
         ))
-        self.assertEqual(plan.stem, "789-张三-week_1-week1")
+        self.assertEqual(plan.stem, "789-张三-week_1")
         with self.assertRaisesRegex(export_lab.ExportError, "不适合文件名"):
             export_lab.make_plan(self.args("--title", "../outside"))
 
