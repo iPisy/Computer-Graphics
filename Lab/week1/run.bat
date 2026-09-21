@@ -15,21 +15,21 @@ if not exist "%PYTHON_EXE%" (
     set "PYTHON_EXE=python"
 )
 
-"%PYTHON_EXE%" -c "import PIL" >nul 2>&1
+"%PYTHON_EXE%" -c "import matplotlib" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Pillow is not installed for the selected Python interpreter.
+    echo [ERROR] Matplotlib is not installed for the selected Python interpreter.
     echo Run: "%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt"
     goto :error
 )
 
 echo [1/2] Running circle.py ...
-echo Close the Circle window to continue.
+echo Close the Matplotlib Circle window to continue.
 "%PYTHON_EXE%" "%~dp0src\circle.py"
 if errorlevel 1 goto :error
 
 echo.
 echo [2/2] Running koch_curve.py ...
-echo Close the Koch Snowflake window to finish.
+echo Close the Matplotlib Koch Snowflake window to finish.
 "%PYTHON_EXE%" "%~dp0src\koch_curve.py"
 if errorlevel 1 goto :error
 

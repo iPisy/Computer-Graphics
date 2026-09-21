@@ -1,138 +1,122 @@
-"""使用 turtle 和递归算法绘制 Koch 雪花。"""
+"""使用 Matplotlib 和递归算法绘制 Koch 雪花。"""
 
 import math
+from pathlib import Path
 
-import turtle
-from PIL import ImageDraw
+import matplotlib.pyplot as plt
 
-from image_utils import save_image
+from image_utils import save_figure
 
 
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 700
+FIGURE_DPI = 100
+
+Point = tuple[float, float]
 
 
-# 绘制 Koch 曲线的函数。
-def koch_curve(pen: turtle.Turtle, length: float, order: int) -> None:
-    if order < 0:
-        raise ValueError("order 不能小于 0")
-
-    # 递归出口
-    if order == 0:
-        pen.forward(length)
-        return
-
-    # 将线段分为三等分，并递归绘制每一段。
-    segment = length / 3
-    koch_curve(pen, segment, order - 1)
-    pen.left(60)
-    koch_curve(pen, segment, order - 1)
-    pen.right(120)
-    koch_curve(pen, segment, order - 1)
-    pen.left(60)
-    koch_curve(pen, segment, order - 1)
-
-
-def _to_image_coordinates(
-    point: tuple[float, float],
-) -> tuple[float, float]:
-    """Convert turtle coordinates (y-up) to image coordinates (y-down)."""
-    x, y = point
-    return SCREEN_WIDTH / 2 + x, SCREEN_HEIGHT / 2 - y
-
-
-def _draw_koch_image_segment(
-    draw: ImageDraw.ImageDraw,
-    start: tuple[float, float],
-    heading: float,
+def _append_koch_points(
+    points: list[Point],
+    start: Point,
+    heading: float, # 角度
     length: float,
     order: int,
-) -> tuple[tuple[float, float], float]:
-    """Draw one Koch segment into a PIL image and return its endpoint."""
+) -> Point:
+    """递归追加一段 Koch 曲线的顶点，并返回终点。"""
     if order == 0:
         angle = math.radians(heading)
         end = (
             start[0] + length * math.cos(angle),
             start[1] + length * math.sin(angle),
         )
-        draw.line(
-            [_to_image_coordinates(start), _to_image_coordinates(end)],
-            fill="purple",
-            width=2,
-        )
-        return end, heading
+        points.append(end)
+        return end
 
     segment = length / 3
-    point, heading = _draw_koch_image_segment(
-        draw, start, heading, segment, order - 1
-    )
-    heading += 60
-    point, heading = _draw_koch_image_segment(
-        draw, point, heading, segment, order - 1
-    )
-    heading -= 120
-    point, heading = _draw_koch_image_segment(
-        draw, point, heading, segment, order - 1
-    )
-    heading += 60
-    return _draw_koch_image_segment(draw, point, heading, segment, order - 1)
-
-
-def _draw_koch_image(
-    draw: ImageDraw.ImageDraw,
-    order: int,
-    length: float,
-) -> None:
-    """Draw the same Koch snowflake as the turtle window on a PIL canvas."""
-    triangle_height = length * math.sqrt(3) / 2
-    point = (-length / 2, triangle_height / 3)
-    heading = 0.0
-
-    for _ in range(3):
-        point, heading = _draw_koch_image_segment(
-            draw, point, heading, length, order
+    point = start
+    for turn in (0, 60, -120, 60):
+        heading += turn
+        point = _append_koch_points(
+            points,
+            point,
+            heading,
+            segment,
+            order - 1,
         )
-        heading -= 120  # turtle.right(120)
+    return point
 
 
-# 绘制由三条 Koch 曲线组成的雪花
-def draw_koch_snowflake(order: int = 4, length: float = 480) -> None:
+def koch_curve(
+    length: float,
+    order: int,
+    *,
+    start: Point = (0.0, 0.0),
+    heading: float = 0.0,
+) -> list[Point]:
+    """计算一段 Koch 曲线的全部顶点。"""
+    if length <= 0:
+        raise ValueError("length 必须大于 0")
     if order < 0:
         raise ValueError("order 不能小于 0")
 
-    screen = turtle.Screen()
-    screen.setup(width=SCREEN_WIDTH, height=SCREEN_HEIGHT)
-    screen.title("Koch Snowflake")
-    screen.bgcolor("white")
-    screen.tracer(0)
+    points = [start]
+    _append_koch_points(points, start, heading, length, order)
+    return points
 
-    pen = turtle.Turtle()
-    pen.hideturtle()
-    pen.speed(0)
-    pen.pensize(2)
-    pen.pencolor("purple")
 
-    # 从等边三角形的左上角开始，使整个雪花位于窗口中央。
+def koch_snowflake_points(order: int, length: float) -> list[Point]:
+    """计算由三段 Koch 曲线组成的雪花顶点。"""
+    if order < 0:
+        raise ValueError("order 不能小于 0")
+    if length <= 0:
+        raise ValueError("length 必须大于 0")
+
     triangle_height = length * math.sqrt(3) / 2
-    pen.penup()
-    pen.goto(-length / 2, triangle_height / 3)
-    pen.setheading(0)
-    pen.pendown()
+    point = (-length / 2, triangle_height / 3)
+    heading = 0.0
+    points = [point]
 
-    # 顺时针绘制三条边，使每条 Koch 曲线的凸起都朝三角形外侧。
     for _ in range(3):
-        koch_curve(pen, length, order)
-        # 画完一条边，顺时针旋转120度，为绘制下一条边做准备。
-        pen.right(120)
+        side = koch_curve(length, order, start=point, heading=heading)
+        points.extend(side[1:])
+        point = side[-1]
+        heading -= 120
 
-    screen.update()
-    saved_path = save_image(
-        filename="koch_curve.png",
-        size=(SCREEN_WIDTH, SCREEN_HEIGHT),
-        draw_image=lambda draw: _draw_koch_image(draw, order, length),
+    return points
+
+
+def draw_koch_snowflake(
+    order: int = 4,
+    length: float = 480,
+    *,
+    show: bool = True,
+) -> Path:
+    """绘制并保存 Koch 雪花，可选择是否显示 Matplotlib 窗口。"""
+    points = koch_snowflake_points(order, length)
+    x_coordinates, y_coordinates = zip(*points)
+
+    figure, axes = plt.subplots(
+        figsize=(SCREEN_WIDTH / FIGURE_DPI, SCREEN_HEIGHT / FIGURE_DPI),
+        dpi=FIGURE_DPI,
     )
+    figure.canvas.manager.set_window_title("Koch Snowflake")
+    figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
+
+    axes.plot(x_coordinates, y_coordinates, color="purple", linewidth=2)
+    axes.set_xlim(-SCREEN_WIDTH / 2, SCREEN_WIDTH / 2)
+    axes.set_ylim(-SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2)
+    axes.set_aspect("equal", adjustable="box")
+    axes.axis("off")
+
+    saved_path = save_figure(figure, "koch_curve.png")
     print(f"Saved image: {saved_path}")
-    screen.mainloop()
+
+    if show:
+        plt.show()
+    else:
+        plt.close(figure)
+
+    return saved_path
 
 
 if __name__ == "__main__":
