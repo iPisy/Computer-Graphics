@@ -150,8 +150,9 @@ def make_plan(args: argparse.Namespace) -> ExportPlan:
     if not re.fullmatch(r"[0-9]+", student_id):
         raise ExportError("学号必须只包含数字。")
     name = filename_part(name, "姓名")
-    title = filename_part(args.title if args.title is not None else lab.name, "实验名称")
-    stem = f"{student_id}-{name}-week_{week}-{title}"
+    stem = f"{student_id}-{name}-week_{week}"
+    if args.title is not None:
+        stem += "-" + filename_part(args.title, "实验名称")
 
     source_files = walk_files(lab / "src")
     source_code = [p for p in source_files if is_code(p)]
@@ -176,6 +177,30 @@ def make_plan(args: argparse.Namespace) -> ExportPlan:
     )
 
 
+def pdf_entries(plan: ExportPlan) -> list[tuple[Path, str]]:
+    """所有 PDF 放在总包根目录；重名时加序号，避免解压覆盖。"""
+    report_name = f"{plan.stem}.pdf"
+    entries = [(plan.report, report_name)]
+    used_names = {report_name.casefold()}
+    original_names = {path.name.casefold() for path in plan.pdfs}
+    pdf_directory = plan.lab / "docs" / "pdf"
+    # 优先保留原本就在 docs/pdf 根目录的文件名。
+    for path in sorted(plan.pdfs, key=lambda p: (len(p.relative_to(pdf_directory).parts), p)):
+        if path == plan.report:
+            continue
+        name = path.name
+        number = 2
+        if name.casefold() in used_names:
+            while True:
+                name = f"{path.stem} ({number}){path.suffix}"
+                number += 1
+                if name.casefold() not in used_names | original_names:
+                    break
+        used_names.add(name.casefold())
+        entries.append((path, name))
+    return entries
+
+
 def export_zip(plan: ExportPlan, *, force: bool = False) -> int:
     plan.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".export-lab-", dir=plan.output.parent) as staging:
@@ -191,10 +216,8 @@ def export_zip(plan: ExportPlan, *, force: bool = False) -> int:
             )
         submission = Path(staging) / "submission.zip"
         with ZipFile(submission, "w", ZIP_DEFLATED, compresslevel=9, strict_timestamps=False) as archive:
-            archive.write(plan.report, f"{plan.stem}.pdf")
-            for path in plan.pdfs:
-                if path != plan.report:
-                    archive.write(path, "pdf/" + path.relative_to(plan.lab / "docs" / "pdf").as_posix())
+            for path, name in pdf_entries(plan):
+                archive.write(path, name)
             archive.write(code_zip, code_zip.name, compress_type=ZIP_STORED)
             for path in plan.results:
                 archive.write(path, "实验结果/" + path.relative_to(plan.lab / "docs").as_posix())
@@ -220,7 +243,7 @@ def export_zip(plan: ExportPlan, *, force: bool = False) -> int:
 def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lab", help="Lab 文件夹路径或 Lab 下的文件夹名，例如 week1")
-    parser.add_argument("--title", help="规范中 xxx 对应的实验名称，默认使用文件夹名")
+    parser.add_argument("--title", help="可选实验名称；指定时追加到文件名，默认只使用学号-姓名-week_x")
     parser.add_argument("--report", help="指定用于识别姓名、学号并重命名的主报告；docs/pdf 内所有 PDF 仍会打包")
     parser.add_argument("--student-id", help="手动指定学号，默认从报告文件名识别")
     parser.add_argument("--name", help="手动指定姓名，默认从报告文件名识别")
@@ -236,8 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         plan = make_plan(args)
         print(f"实验报告：{plan.report.relative_to(plan.lab)}")
         print("全部 PDF 文件：")
-        for path in plan.pdfs:
-            print(f"  {path.relative_to(plan.lab)}")
+        for path, name in pdf_entries(plan):
+            print(f"  {path.relative_to(plan.lab)} -> {name}")
         print("代码文件：")
         for path in plan.code:
             print(f"  {path.relative_to(plan.lab)}")
