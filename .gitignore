@@ -5,3 +5,5 @@ __pycache__/
 shortcuts.md
 作业上交规范.md
 todolist.md
+/Lab/exports/*.zip
+/Lab/exports/.export-lab-*/
